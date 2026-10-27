@@ -4,7 +4,7 @@ Aplikasi Windows untuk memakai dua sesi WhatsApp Web dalam satu jendela. Proyek 
 
 ## Unduh installer
 
-Unduh installer Windows 64-bit dari [rilis 1.1.0 preview](https://github.com/handigunawan59-stack/hy-duo-whatsapp/releases/tag/v1.1.0-preview). Tutup DuoDesk versi lama melalui ikon baki sistem sebelum menjalankan installer. Installer belum ditandatangani secara digital dan Windows dapat menampilkan peringatan.
+Unduh installer Windows 64-bit dari [rilis 1.2.0 preview](https://github.com/handigunawan59-stack/hy-duo-whatsapp/releases/tag/v1.2.0-preview). Tutup DuoDesk versi lama melalui ikon baki sistem sebelum menjalankan installer. Installer belum ditandatangani secara digital dan Windows dapat menampilkan peringatan.
 
 ## Fitur
 
@@ -17,6 +17,9 @@ Unduh installer Windows 64-bit dari [rilis 1.1.0 preview](https://github.com/han
 - Pusat unduhan dengan riwayat lokal, progres, dan tindakan membuka file atau folder.
 - Startup opsional saat masuk Windows, dengan opsi mulai di tray; pintasan global dan pemeriksaan pembaruan secara manual.
 - Nama dan warna akun, rasio panel, tema aplikasi, dan kunci otomatis dengan PIN yang sudah dikonfigurasi.
+- Tampilan atas–bawah, zoom terpisah, dan bantuan pemulihan koneksi yang memerlukan tindakan pengguna.
+- Riwayat notifikasi bersifat opsional dan nonaktif secara bawaan; filter dan pencarian unduhan.
+- Pintasan yang dapat diubah, pencadangan pengaturan tampilan, serta pengecekan pembaruan berkala yang opsional.
 
 WhatsApp Web menangani login melalui QR, pesan, unggahan, dan unduhan. Aplikasi tidak menyediakan pintasan penerusan otomatis antar-akun.
 
@@ -33,10 +36,12 @@ Untuk membuat installer, pasang NSIS kemudian jalankan `powershell -ExecutionPol
 
 Panduan dan skrip penandatanganan opsional tersedia di [SIGNING.md](duodesk/installer/SIGNING.md). Sertifikat tepercaya dan akses ke private key harus disediakan pemilik aplikasi; tidak ada sertifikat yang disertakan.
 
-Pemeriksaan otomatis dapat dijalankan dengan `dotnet run --project duodesk-tests`, `dotnet run --project pinlock-tests`, `dotnet run --project notification-bridge-tests`, `dotnet run --project download-history-tests`, dan `dotnet run --project os-features-tests`.
+Pemeriksaan otomatis dapat dijalankan dengan `dotnet run --project duodesk-tests`, `dotnet run --project pinlock-tests`, `dotnet run --project notification-bridge-tests`, `dotnet run --project download-history-tests`, `dotnet run --project notification-history-tests`, `dotnet run --project advanced-tests`, dan `dotnet run --project os-features-tests`.
 
 ## Data dan privasi
 
 Sesi login, pengaturan, dan PIN berada di folder data lokal pengguna (`%LOCALAPPDATA%\DuoDesk`) dan tidak termasuk dalam repositori. PIN mengunci tampilan, bukan mengenkripsi sesi atau file. Menghapus instalasi mempertahankan data sesi kecuali dihapus secara manual. Tinjau pengaturan notifikasi jika isi pesan tidak ingin ditampilkan pada layar.
 
 Pengembang tidak dapat menjamin notifikasi ketika aplikasi dihentikan, komputer tidur, koneksi terputus, atau WhatsApp Web mengubah perilakunya. Microsoft WebView2 tidak menyediakan web push notifications. Tes notifikasi memeriksa aplikasi, bukan penerimaan pesan WhatsApp yang sesungguhnya; diagnostik tidak memverifikasi semua izin Windows dan WhatsApp. WhatsApp dapat meminta login ulang sewaktu-waktu. Riwayat nama dan lokasi file disimpan secara lokal dalam `download-history.json` dan dapat dibersihkan melalui pusat unduhan.
+
+Jika pengguna secara sukarela mengaktifkan riwayat notifikasi, nama pengirim dan isi pemberitahuan disimpan secara lokal tanpa enkripsi. Riwayat tersebut dapat dihapus di aplikasi. Menonaktifkan pencatatan tidak otomatis menghapus entri yang sudah tersimpan. Cadangan tampilan tidak memuat sesi login, PIN, file, atau pesan.

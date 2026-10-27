@@ -22,6 +22,15 @@ internal sealed class DownloadHistory
     public string? StorageProblem { get; private set; }
     public event Action? Changed;
 
+    public IReadOnlyList<DownloadRecord> Filter(string? search, string? account, string? state)
+    {
+        string query = search?.Trim() ?? "";
+        return items.Where(item =>
+            (query.Length == 0 || (System.IO.Path.GetFileName(item.Path) ?? "").Contains(query, StringComparison.CurrentCultureIgnoreCase)) &&
+            (string.IsNullOrEmpty(account) || item.Account == account) &&
+            (string.IsNullOrEmpty(state) || item.State == state)).ToArray();
+    }
+
     public DownloadHistory(string path)
     {
         this.path = path;

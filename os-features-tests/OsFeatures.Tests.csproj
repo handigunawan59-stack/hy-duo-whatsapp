@@ -1,4 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWindowsForms>true</UseWindowsForms><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
-  <ItemGroup><Compile Include="../duodesk/OsFeatures.cs" Link="OsFeatures.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../duodesk/OsFeatures.cs" Link="OsFeatures.cs" /><Compile Include="../duodesk/AdvancedOptions.cs" Link="AdvancedOptions.cs" /><Compile Include="../duodesk/AppSettings.cs" Link="AppSettings.cs" /><Compile Include="../duodesk/LayoutPreferences.cs" Link="LayoutPreferences.cs" /></ItemGroup>
 </Project>

@@ -35,6 +35,17 @@ try
     Check(((System.Collections.IEnumerable)Read(active, "Items")!).Cast<object>().Count() == 1, "Clearing history keeps active download progress visible.");
     var resumed = ((System.Collections.IEnumerable)Read(History(), "Items")!).Cast<object>().Single();
     Check((string)Read(resumed, "State")! == "interrupted", "A download in progress at shutdown is not reported as completed.");
+    var searchable = History();
+    Call(searchable, "Start", "personal", Path.Combine(testRoot, "invoice.pdf"));
+    var picture = Call(searchable, "Start", "business", Path.Combine(testRoot, "photo.png"))!;
+    Call(searchable, "Update", (string)Read(picture, "Id")!, 5L, 5L, "completed", Path.Combine(testRoot, "photo.png"));
+    var matches = ((System.Collections.IEnumerable)Call(searchable, "Filter", "INVOICE", "personal", "downloading")!).Cast<object>().ToArray();
+    Check(matches.Length == 1 && (string)Read(matches[0], "Account")! == "personal", "Search filters file names without case sensitivity and by account and status.");
+    var none = ((System.Collections.IEnumerable)Call(searchable, "Filter", "invoice", "business", null)!).Cast<object>().ToArray();
+    Check(none.Length == 0, "A filter must not return files from the other account.");
+    picture.GetType().GetProperty("Path")!.SetValue(picture, null);
+    var safe = ((System.Collections.IEnumerable)Call(searchable, "Filter", "photo", null, null)!).Cast<object>().ToArray();
+    Check(safe.Length == 0, "Filtering ignores an invalid missing file path without crashing.");
     return 0;
 }
 finally { Directory.Delete(testRoot, true); }

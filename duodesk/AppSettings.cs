@@ -14,6 +14,8 @@ internal sealed class AppSettings
     public string BusinessColor { get; set; } = "#27AE75";
     public string Theme { get; set; } = "system";
     public double SplitRatio { get; set; } = 0.5;
+    public double PersonalZoom { get; set; } = 1.0;
+    public double BusinessZoom { get; set; } = 1.0;
     public string PersonalSound { get; set; } = "Asterisk";
     public string BusinessSound { get; set; } = "Asterisk";
     public bool HidePreviewWhenLocked { get; set; }

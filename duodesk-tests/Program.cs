@@ -29,6 +29,26 @@ Check(LayoutPreferences.Ratio(3) == .8 && LayoutPreferences.Ratio(-1) == .2, "Sp
 Check(LayoutPreferences.IsDark("dark", false), "Dark theme is selected explicitly.");
 Check(LayoutPreferences.IsDark("system", true), "System theme follows Windows.");
 Check(!LayoutPreferences.IsDark("light", true), "Light theme overrides Windows.");
+Check(LayoutPreferences.Layout("stack") == "stack", "Top-bottom is a recognized layout.");
+Check(LayoutPreferences.Layout("broken") == "split", "Invalid layouts fall back to split.");
+Check(LayoutPreferences.Zoom(1.25) == 1.25, "Valid zoom is retained.");
+Check(LayoutPreferences.Zoom(.1) == .5 && LayoutPreferences.Zoom(4) == 2.0, "Zoom remains within supported bounds.");
+Check(LayoutPreferences.Zoom(double.NaN) == 1.0, "Invalid zoom uses default.");
+Check(ConnectionAdvice.ForError("Disconnected").Contains("Jaringan", StringComparison.OrdinalIgnoreCase), "Disconnected status mentions the network.");
+Check(ConnectionAdvice.ForError("Timeout").Contains("waktu", StringComparison.OrdinalIgnoreCase), "Timeout status explains what happened.");
+Check(!string.IsNullOrWhiteSpace(ConnectionAdvice.ForError("UnexpectedStatus")), "Unknown errors have a safe message.");
+
+// Independent zoom factors and vertical layout must survive the existing settings store.
+var layoutPath = Path.Combine(Path.GetTempPath(), "hy-layout-" + Guid.NewGuid().ToString("N") + ".json");
+File.WriteAllText(layoutPath, "{\"LayoutMode\":\"stack\",\"PersonalZoom\":1.25,\"BusinessZoom\":0.8}");
+SettingsStore.Save(layoutPath, SettingsStore.Load(layoutPath));
+using (var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(layoutPath)))
+{
+    Check(doc.RootElement.GetProperty("LayoutMode").GetString() == "stack", "Top-bottom layout must persist.");
+    Check(doc.RootElement.TryGetProperty("PersonalZoom", out var pz) && Math.Abs(pz.GetDouble() - 1.25) < .001, "Personal zoom must persist.");
+    Check(doc.RootElement.TryGetProperty("BusinessZoom", out var bz) && Math.Abs(bz.GetDouble() - .8) < .001, "Business zoom must persist separately.");
+}
+File.Delete(layoutPath);
 var personal = AppPaths.ProfileDirectory(root, "personal");
 var business = AppPaths.ProfileDirectory(root, "business");
 Check(personal != business, "Account sessions must use distinct profile directories.");

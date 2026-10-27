@@ -61,36 +61,54 @@ internal sealed class HotkeyActions(Action open, Action personal, Action busines
 internal sealed class GlobalHotkeys : NativeWindow, IDisposable
 {
     private const int HotkeyMessage = 0x0312;
-    private const uint Modifiers = 0x0001 | 0x0002 | 0x0004 | 0x4000; // Alt, Ctrl, Shift, no repeat
     private const int BaseId = 0x4800;
     private readonly HotkeyActions actions;
     private readonly List<int> registered = new();
+    private int[] shortcuts;
     private bool disposed;
 
-    internal GlobalHotkeys(IntPtr window, HotkeyActions actions)
+    internal GlobalHotkeys(IntPtr window, HotkeyActions actions, int[]? shortcuts = null)
     {
         if (window == IntPtr.Zero) throw new ArgumentException("Window handle is required.", nameof(window));
         this.actions = actions;
+        this.shortcuts = AdvancedOptions.ValidShortcuts(shortcuts) ? (int[])shortcuts!.Clone() : AdvancedOptions.DefaultShortcuts();
         AssignHandle(window);
     }
     internal IReadOnlyList<string> Register()
     {
         if (disposed) throw new ObjectDisposedException(nameof(GlobalHotkeys));
         var failures = new List<string>();
-        foreach (var (id, key, label) in new[]
+        for (int id = 1; id <= shortcuts.Length; id++)
         {
-            (1, (uint)Keys.W, "Ctrl+Alt+Shift+W"),
-            (2, (uint)Keys.D1, "Ctrl+Alt+Shift+1"),
-            (3, (uint)Keys.D2, "Ctrl+Alt+Shift+2"),
-            (4, (uint)Keys.D3, "Ctrl+Alt+Shift+3")
-        })
-        {
+            var shortcut = (Keys)shortcuts[id - 1];
+            uint modifiers = 0x4000; // no repeat
+            if ((shortcut & Keys.Alt) != 0) modifiers |= 1;
+            if ((shortcut & Keys.Control) != 0) modifiers |= 2;
+            if ((shortcut & Keys.Shift) != 0) modifiers |= 4;
             var nativeId = BaseId + id;
             if (registered.Contains(nativeId)) continue;
-            if (RegisterHotKey(Handle, nativeId, Modifiers, key)) registered.Add(nativeId);
-            else failures.Add(label);
+            if (RegisterHotKey(Handle, nativeId, modifiers, (uint)(shortcut & Keys.KeyCode))) registered.Add(nativeId);
+            else failures.Add(new KeysConverter().ConvertToString(shortcut) ?? shortcut.ToString());
         }
         return failures;
+    }
+    internal IReadOnlyList<string> Rebind(int[] proposed)
+    {
+        if (!AdvancedOptions.ValidShortcuts(proposed)) return ["Pintasan harus berbeda dan menggunakan Ctrl atau Alt."];
+        var old = shortcuts;
+        Unregister();
+        shortcuts = (int[])proposed.Clone();
+        var failures = Register();
+        if (failures.Count == 0) return failures;
+        Unregister();
+        shortcuts = old;
+        Register();
+        return failures;
+    }
+    private void Unregister()
+    {
+        foreach (var id in registered) UnregisterHotKey(Handle, id);
+        registered.Clear();
     }
     protected override void WndProc(ref Message message)
     {
@@ -105,8 +123,7 @@ internal sealed class GlobalHotkeys : NativeWindow, IDisposable
     {
         if (disposed) return;
         disposed = true;
-        foreach (var id in registered) UnregisterHotKey(Handle, id);
-        registered.Clear();
+        Unregister();
         ReleaseHandle();
     }
     [DllImport("user32.dll", SetLastError = true)] private static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint key);
@@ -117,7 +134,7 @@ internal sealed record AvailableRelease(string Tag, string PageUrl);
 
 internal static class ReleaseChecker
 {
-    internal const string CurrentVersion = "1.1.0-preview";
+    internal const string CurrentVersion = "1.2.0-preview";
     private const string Repository = "https://github.com/handigunawan59-stack/hy-duo-whatsapp";
     private const string ReleasesApi = "https://api.github.com/repos/handigunawan59-stack/hy-duo-whatsapp/releases?per_page=25";
     private static readonly Regex VersionPattern = new(@"^v?(\d{1,8})\.(\d{1,8})\.(\d{1,8})(?:-([0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*))?$", RegexOptions.CultureInvariant);

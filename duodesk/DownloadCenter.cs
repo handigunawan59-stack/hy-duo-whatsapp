@@ -101,6 +101,9 @@ internal sealed class DownloadCenterDialog : Form
     private readonly Func<string, string> accountName;
     private readonly ListView list = new() { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, MultiSelect = false, HideSelection = false };
     private readonly Label storageStatus = new() { AutoSize = true, ForeColor = Color.Firebrick };
+    private readonly TextBox search = new() { Width = 200, PlaceholderText = "Cari nama file…" };
+    private readonly ComboBox accountFilter = new() { Width = 135, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly ComboBox stateFilter = new() { Width = 120, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 500 };
     private bool dirty;
 
@@ -118,6 +121,13 @@ internal sealed class DownloadCenterDialog : Form
         list.Columns.Add("Nama file", 270);
         list.Columns.Add("Progres", 120);
         list.Columns.Add("Status", 110);
+        var filters = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 43, Padding = new Padding(8, 6, 8, 4), WrapContents = false };
+        accountFilter.Items.AddRange(new object[] { "Semua akun", accountName("personal"), accountName("business") }); accountFilter.SelectedIndex = 0;
+        stateFilter.Items.AddRange(new object[] { "Semua status", "Mengunduh", "Selesai", "Terhenti" }); stateFilter.SelectedIndex = 0;
+        search.TextChanged += (_, _) => RebuildList();
+        accountFilter.SelectedIndexChanged += (_, _) => RebuildList();
+        stateFilter.SelectedIndexChanged += (_, _) => RebuildList();
+        filters.Controls.Add(search); filters.Controls.Add(accountFilter); filters.Controls.Add(stateFilter);
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(8), WrapContents = false };
         var open = new Button { Text = "Buka file", AutoSize = true };
         var folder = new Button { Text = "Buka folder", AutoSize = true };
@@ -134,6 +144,7 @@ internal sealed class DownloadCenterDialog : Form
         buttons.Controls.Add(storageStatus);
         Controls.Add(list);
         Controls.Add(buttons);
+        Controls.Add(filters);
         history.Changed += MarkDirty;
         refreshTimer.Tick += (_, _) => { if (dirty) RebuildList(); };
         refreshTimer.Start();
@@ -150,7 +161,9 @@ internal sealed class DownloadCenterDialog : Form
         try
         {
             list.Items.Clear();
-            foreach (var record in history.Items)
+            string? account = accountFilter.SelectedIndex switch { 1 => "personal", 2 => "business", _ => null };
+            string? stateFilterKey = stateFilter.SelectedIndex switch { 1 => "downloading", 2 => "completed", 3 => "interrupted", _ => null };
+            foreach (var record in history.Filter(search.Text, account, stateFilterKey))
             {
                 string progress = record.TotalBytes is > 0 ? $"{Math.Min(100, (double)record.BytesReceived / record.TotalBytes.Value * 100):0}%" : $"{record.BytesReceived / 1024} KB";
                 string state = record.State switch { "completed" => "Selesai", "interrupted" => "Terhenti", _ => "Mengunduh" };

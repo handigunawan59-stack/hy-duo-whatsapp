@@ -22,8 +22,13 @@ internal sealed class MainForm : Form
     private readonly AppSettings settings;
     private readonly NotifyIcon tray;
     private readonly NotificationBridge notifications;
+    private readonly NotificationHistory notificationHistory;
     private readonly DownloadCenter downloads;
     private readonly System.Windows.Forms.Timer idleTimer = new() { Interval = 5000 };
+    private readonly System.Windows.Forms.Timer updateTimer = new() { Interval = 600000 };
+    private readonly AdvancedSettings advanced;
+    private readonly string advancedPath;
+    private NotifyIcon? updateTray;
     private GlobalHotkeys? hotkeys;
     private readonly bool startHidden;
     private readonly Panel contentHost = new() { Dock = DockStyle.Fill, BackColor = Background, Padding = new Padding(16) };
@@ -43,10 +48,14 @@ internal sealed class MainForm : Form
     private bool locked;
     private bool initialized;
     private bool adjustingLayout;
+    private bool checkingUpdates;
 
     public MainForm(string dataDirectory, Uri? testPage, bool startHidden = false)
     {
         this.dataDirectory = dataDirectory;
+        advancedPath = Path.Combine(dataDirectory, "advanced-options.json");
+        advanced = AdvancedOptions.Load(advancedPath);
+        notificationHistory = new NotificationHistory(Path.Combine(dataDirectory, "notification-history.json"));
         this.startHidden = startHidden;
         downloads = new DownloadCenter(dataDirectory);
         isTest = testPage is not null;
@@ -55,12 +64,14 @@ internal sealed class MainForm : Form
         pinPath = Path.Combine(dataDirectory, "pin.json");
         settings = SettingsStore.Load(settingsPath);
         if (settings.ActiveAccount is not ("personal" or "business")) settings.ActiveAccount = "personal";
-        if (settings.LayoutMode is not ("tabs" or "split")) settings.LayoutMode = "split";
+        settings.LayoutMode = LayoutPreferences.Layout(settings.LayoutMode);
         settings.PersonalLabel = LayoutPreferences.Label(settings.PersonalLabel, "Pribadi");
         settings.BusinessLabel = LayoutPreferences.Label(settings.BusinessLabel, "Usaha");
         settings.PersonalColor = LayoutPreferences.Color(settings.PersonalColor, "#7D79D8");
         settings.BusinessColor = LayoutPreferences.Color(settings.BusinessColor, "#27AE75");
         settings.SplitRatio = LayoutPreferences.Ratio(settings.SplitRatio);
+        settings.PersonalZoom = LayoutPreferences.Zoom(settings.PersonalZoom);
+        settings.BusinessZoom = LayoutPreferences.Zoom(settings.BusinessZoom);
         locked = PinLock.IsConfigured(pinPath);
 
         Text = isTest ? "DuoDesk — pengujian lokal" : "HY Duo WhatsApp";
@@ -97,6 +108,7 @@ internal sealed class MainForm : Form
         tray.DoubleClick += (_, _) => RestoreWindow();
         notifications = new NotificationBridge(tray, SelectAccount, SetAccountStatus, page.GetLeftPart(UriPartial.Authority));
         notifications.Configure(key => NotificationBridge.SoundForAccount(key, settings.PersonalSound, settings.BusinessSound), () => locked && settings.HidePreviewWhenLocked, key => key == "personal" ? settings.PersonalLabel : settings.BusinessLabel);
+        notifications.ConfigureHistory(notificationHistory.Record);
 
         panes["personal"] = new BrowserPane("personal", settings.PersonalLabel, ColorTranslator.FromHtml(settings.PersonalColor), this);
         panes["business"] = new BrowserPane("business", settings.BusinessLabel, ColorTranslator.FromHtml(settings.BusinessColor), this);
@@ -113,18 +125,20 @@ internal sealed class MainForm : Form
         split.SizeChanged += (_, _) => CenterSplitter();
         split.SplitterMoved += (_, _) =>
         {
-            if (adjustingLayout || settings.LayoutMode != "split" || split.Width <= 0 || !initialized) return;
-            settings.SplitRatio = LayoutPreferences.Ratio((double)split.SplitterDistance / split.Width);
+            int axis = split.Orientation == Orientation.Horizontal ? split.Height : split.Width;
+            if (adjustingLayout || settings.LayoutMode == "tabs" || axis <= 0 || !initialized) return;
+            settings.SplitRatio = LayoutPreferences.Ratio((double)split.SplitterDistance / axis);
             SaveSettings();
         };
         FormClosing += OnClosing;
         Resize += (_, _) => { if (WindowState == FormWindowState.Minimized) Hide(); };
         Shown += async (_, _) =>
         {
-            hotkeys = new GlobalHotkeys(Handle, new HotkeyActions(RestoreWindow, () => SelectAccount("personal"), () => SelectAccount("business"), () => { settings.LayoutMode = "split"; ApplyLayout(); SaveSettings(); RestoreWindow(); }));
+            hotkeys = new GlobalHotkeys(Handle, new HotkeyActions(RestoreWindow, () => SelectAccount("personal"), () => SelectAccount("business"), () => { settings.LayoutMode = "split"; ApplyLayout(); SaveSettings(); RestoreWindow(); }), advanced.Shortcuts);
             var unavailable = hotkeys.Register();
             if (unavailable.Count > 0) subtitle.Text = "Pintasan tidak tersedia: " + string.Join(", ", unavailable);
             if (this.startHidden) BeginInvoke(Hide);
+            _ = TryPeriodicUpdateAsync();
             await InitializeBrowsersAsync();
         };
         idleTimer.Tick += (_, _) =>
@@ -135,6 +149,8 @@ internal sealed class MainForm : Form
             ApplyLock();
         };
         idleTimer.Start();
+        updateTimer.Tick += async (_, _) => await TryPeriodicUpdateAsync();
+        updateTimer.Start();
         SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
         ApplyLayout();
         ApplyLock();
@@ -144,8 +160,7 @@ internal sealed class MainForm : Form
     private Control CreateTitleBar()
     {
         var bar = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(24, 12, 20, 8) };
-        var mark = new Label { Text = "HY", TextAlign = ContentAlignment.MiddleCenter, BackColor = Green, ForeColor = Color.White, Font = new Font("Segoe UI", 12F, FontStyle.Bold), Bounds = new Rectangle(24, 16, 46, 46) };
-        mark.Region = RoundedRegion(mark.ClientRectangle, 13);
+        var mark = new PictureBox { Image = (Icon ?? SystemIcons.Application).ToBitmap(), SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Transparent, Bounds = new Rectangle(24, 16, 46, 46) };
         var title = new Label { AutoSize = true, Text = "HY Duo WhatsApp", Font = new Font("Segoe UI", 16F, FontStyle.Bold), ForeColor = Ink, Location = new Point(84, 13) };
         subtitle.Location = new Point(87, 46);
         bar.Controls.Add(mark);
@@ -193,9 +208,32 @@ internal sealed class MainForm : Form
     private void ConfigureMenu()
     {
         options.Items.Add("Tampilan dan nama akun…", null, (_, _) => ShowPersonalization());
+        options.Items.Add("Susun akun atas–bawah", null, (_, _) => { settings.LayoutMode = "stack"; ApplyLayout(); SaveSettings(); });
+        var zoomMenu = new ToolStripMenuItem("Ukuran tampilan WhatsApp");
+        foreach (var key in new[] { "personal", "business" })
+        {
+            var accountMenu = new ToolStripMenuItem(key == "personal" ? "Akun pertama" : "Akun kedua");
+            accountMenu.DropDownItems.Add("Perbesar", null, (_, _) => ChangeZoom(key, 0.1));
+            accountMenu.DropDownItems.Add("Perkecil", null, (_, _) => ChangeZoom(key, -0.1));
+            accountMenu.DropDownItems.Add("Ukuran normal", null, (_, _) => ChangeZoom(key, null));
+            zoomMenu.DropDownItems.Add(accountMenu);
+        }
+        options.Items.Add(zoomMenu);
+        options.Items.Add("Bantuan koneksi…", null, (_, _) => ShowConnectionHelp());
         options.Items.Add("Notifikasi dan kunci otomatis…", null, (_, _) => { if (NotificationOptionsDialog.Show(this, settings, notifications, key => key == "personal" ? settings.PersonalLabel : settings.BusinessLabel, key => panes[key].StatusText)) SaveSettings(); });
+        options.Items.Add("Riwayat notifikasi…", null, (_, _) => NotificationHistoryDialog.Show(this, notificationHistory, key => key == "personal" ? settings.PersonalLabel : settings.BusinessLabel));
         options.Items.Add("Pusat unduhan…", null, (_, _) => downloads.Show(this, key => key == "personal" ? settings.PersonalLabel : settings.BusinessLabel));
         options.Items.Add("Startup dan pintasan…", null, (_, _) => ShowStartup());
+        options.Items.Add("Atur pintasan dan pembaruan…", null, (_, _) => { if (hotkeys is not null && AdvancedOptionsDialog.Show(this, advanced, hotkeys)) { SaveAdvanced(); _ = TryPeriodicUpdateAsync(); } });
+        options.Items.Add("Ekspor tampilan…", null, (_, _) => AdvancedOptionsDialog.ExportAppearance(this, settings));
+        options.Items.Add("Impor tampilan…", null, (_, _) =>
+        {
+            if (!AdvancedOptionsDialog.ImportAppearance(this, settings)) return;
+            ApplyLayout(); ApplyPersonalization();
+            if (panes["personal"].Browser.CoreWebView2 is not null) panes["personal"].Browser.ZoomFactor = LayoutPreferences.Zoom(settings.PersonalZoom);
+            if (panes["business"].Browser.CoreWebView2 is not null) panes["business"].Browser.ZoomFactor = LayoutPreferences.Zoom(settings.BusinessZoom);
+            SaveSettings();
+        });
         options.Items.Add("Periksa pembaruan…", null, async (_, _) => await CheckUpdatesAsync());
         options.Items.Add(new ToolStripSeparator());
         options.Items.Add("Folder unduhan Pribadi…", null, (_, _) => ChooseFolder("personal"));
@@ -251,6 +289,13 @@ internal sealed class MainForm : Form
             Directory.CreateDirectory(downloadFolder);
             var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: profilePath);
             await pane.Browser.EnsureCoreWebView2Async(environment);
+            pane.Browser.ZoomFactor = LayoutPreferences.Zoom(key == "personal" ? settings.PersonalZoom : settings.BusinessZoom);
+            pane.Browser.ZoomFactorChanged += (_, _) =>
+            {
+                if (key == "personal") settings.PersonalZoom = LayoutPreferences.Zoom(pane.Browser.ZoomFactor);
+                else settings.BusinessZoom = LayoutPreferences.Zoom(pane.Browser.ZoomFactor);
+                SaveSettings();
+            };
             var core = pane.Browser.CoreWebView2;
             downloads.Attach(core, key);
             core.Profile.DefaultDownloadFolderPath = downloadFolder;
@@ -279,6 +324,7 @@ internal sealed class MainForm : Form
             core.NavigationCompleted += async (_, e) =>
             {
                 var navigationId = e.NavigationId;
+                var error = e.WebErrorStatus.ToString();
                 if (e.IsSuccess)
                 {
                     if (navigation.IsCurrent(navigationId)) pane.SetStatus("Halaman terbuka");
@@ -288,7 +334,7 @@ internal sealed class MainForm : Form
                 // Allow that event to identify the same navigation before showing an error.
                 await Task.Delay(1000);
                 if (!IsDisposed && navigation.ShouldReportFailure(navigationId, isSuccess: false))
-                    pane.SetStatus("Koneksi halaman bermasalah — muat ulang");
+                    pane.SetStatus(ConnectionAdvice.ForError(error));
             };
             core.DocumentTitleChanged += (_, _) => UpdateUnread(key, core.DocumentTitle);
             core.ProcessFailed += (_, e) => pane.SetStatus(e.ProcessFailedKind == CoreWebView2ProcessFailedKind.BrowserProcessExited
@@ -331,6 +377,7 @@ internal sealed class MainForm : Form
         {
             split.Panel1Collapsed = false;
             split.Panel2Collapsed = false;
+            split.Orientation = settings.LayoutMode == "stack" ? Orientation.Horizontal : Orientation.Vertical;
             if (settings.LayoutMode == "tabs")
             {
                 if (settings.ActiveAccount == "personal") split.Panel2Collapsed = true;
@@ -353,12 +400,13 @@ internal sealed class MainForm : Form
 
     private void CenterSplitter()
     {
-        if (settings.LayoutMode != "split" || split.Panel1Collapsed || split.Panel2Collapsed || split.Width < 300) return;
+        int axis = split.Orientation == Orientation.Horizontal ? split.Height : split.Width;
+        if (settings.LayoutMode == "tabs" || split.Panel1Collapsed || split.Panel2Collapsed || axis < 300) return;
         try
         {
             bool wasAdjusting = adjustingLayout;
             adjustingLayout = true;
-            try { split.SplitterDistance = Math.Max(split.Panel1MinSize, Math.Min((int)(split.Width * LayoutPreferences.Ratio(settings.SplitRatio)), split.Width - split.Panel2MinSize - split.SplitterWidth)); }
+            try { split.SplitterDistance = Math.Max(split.Panel1MinSize, Math.Min((int)(axis * LayoutPreferences.Ratio(settings.SplitRatio)), axis - split.Panel2MinSize - split.SplitterWidth)); }
             finally { adjustingLayout = wasAdjusting; }
         }
         catch (InvalidOperationException) { }
@@ -388,6 +436,41 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or System.Runtime.InteropServices.COMException)
         { MessageBox.Show(this, "Folder unduhan tidak dapat digunakan.\n\n" + ex.Message, "HY Duo WhatsApp", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+    }
+
+    private void ChangeZoom(string key, double? adjustment)
+    {
+        var pane = panes[key];
+        double current = key == "personal" ? settings.PersonalZoom : settings.BusinessZoom;
+        double requested = LayoutPreferences.Zoom(adjustment is null ? 1.0 : Math.Round(current + adjustment.Value, 2));
+        if (key == "personal") settings.PersonalZoom = requested; else settings.BusinessZoom = requested;
+        if (pane.Browser.CoreWebView2 is not null) pane.Browser.ZoomFactor = requested;
+        SaveSettings();
+        pane.SetStatus($"Ukuran tampilan {requested * 100:0}%");
+    }
+
+    private void ShowConnectionHelp()
+    {
+        using var dialog = new Form { Text = "Bantuan koneksi", StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false, ClientSize = new Size(520, 260), Font = Font };
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(18) };
+        string network;
+        try { network = System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable() ? "Jaringan Windows tersedia; internet belum tentu terhubung." : "Jaringan Windows tidak tersedia."; }
+        catch (System.Net.NetworkInformation.NetworkInformationException) { network = "Status jaringan Windows tidak tersedia."; }
+        flow.Controls.Add(new Label { Text = network, AutoSize = true });
+        flow.Controls.Add(new Label { Text = $"{settings.PersonalLabel}: {panes["personal"].StatusText}\n{settings.BusinessLabel}: {panes["business"].StatusText}", Width = 470, Height = 50, Margin = new Padding(3, 10, 3, 3) });
+        flow.Controls.Add(new Label { Text = "Periksa koneksi internet, lalu muat ulang hanya akun yang bermasalah. Periksa draf sebelum memuat ulang.", Width = 470, Height = 45 });
+        var buttons = new FlowLayoutPanel { Width = 470, Height = 44, WrapContents = false };
+        foreach (var key in new[] { "personal", "business" })
+        {
+            var button = new Button { Text = "Muat ulang " + panes[key].AccountName, AutoSize = true };
+            button.Click += (_, _) =>
+            {
+                if (MessageBox.Show(dialog, "Memuat ulang dapat mengganggu draf yang belum dikirim. Lanjutkan?", "Muat ulang", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                panes[key].Reload(); dialog.Close();
+            };
+            buttons.Controls.Add(button);
+        }
+        flow.Controls.Add(buttons); dialog.Controls.Add(flow); dialog.ShowDialog(this);
     }
 
     private void OpenFolder(string key)
@@ -515,7 +598,7 @@ internal sealed class MainForm : Form
         var enabled = new CheckBox { Text = "Jalankan saat masuk Windows", AutoSize = true, Checked = isEnabled };
         var hidden = new CheckBox { Text = "Mulai tersembunyi di tray", AutoSize = true, Checked = startsHidden };
         panel.Controls.Add(enabled); panel.Controls.Add(hidden);
-        panel.Controls.Add(new Label { Text = "Pintasan: Ctrl+Alt+Shift+W buka aplikasi\nCtrl+Alt+Shift+1 / 2 memilih akun\nCtrl+Alt+Shift+3 menampilkan berdampingan", AutoSize = true, Margin = new Padding(3, 15, 3, 12) });
+        panel.Controls.Add(new Label { Text = "Pintasan dapat disesuaikan melalui\nPengaturan > Atur pintasan dan pembaruan.", AutoSize = true, Margin = new Padding(3, 15, 3, 12) });
         var save = MakeButton("Simpan", 90); save.Click += (_, _) =>
         {
             try { StartupRegistration.SetEnabled(enabled.Checked, hidden.Checked); dialog.Close(); }
@@ -536,6 +619,40 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or System.ComponentModel.Win32Exception or InvalidOperationException)
         { if (!IsDisposed) MessageBox.Show(this, "Pembaruan tidak dapat diperiksa. Periksa koneksi internet.", "Pembaruan", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+    }
+
+    private void SaveAdvanced()
+    {
+        try { AdvancedOptions.Save(advancedPath, advanced); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        { if (!IsDisposed) MessageBox.Show(this, "Pengaturan pintasan tidak dapat disimpan.\n\n" + ex.Message, "Pengaturan", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+    }
+
+    private async Task TryPeriodicUpdateAsync()
+    {
+        if (checkingUpdates || !AdvancedOptions.UpdateDue(advanced.CheckUpdatesAutomatically, advanced.LastChecked, DateTimeOffset.UtcNow)) return;
+        checkingUpdates = true;
+        try
+        {
+            var release = await ReleaseChecker.CheckAsync();
+            if (IsDisposed) return;
+            advanced.LastChecked = DateTimeOffset.UtcNow;
+            SaveAdvanced();
+            if (release is null) return;
+            updateTray?.Dispose();
+            var notice = new NotifyIcon { Icon = Icon ?? SystemIcons.Application, Text = "HY Duo WhatsApp — pembaruan", Visible = true };
+            updateTray = notice;
+            notice.BalloonTipClicked += (_, _) =>
+            {
+                try { Process.Start(new ProcessStartInfo(release.PageUrl) { UseShellExecute = true }); }
+                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { }
+                notice.Visible = false;
+            };
+            notice.BalloonTipClosed += (_, _) => notice.Visible = false;
+            notice.ShowBalloonTip(10000, "Pembaruan tersedia", $"HY Duo WhatsApp {release.Tag} tersedia di GitHub.", ToolTipIcon.Info);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        finally { checkingUpdates = false; }
     }
 
     private void SaveSettings()
@@ -560,6 +677,8 @@ internal sealed class MainForm : Form
         SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
         downloads.Dispose();
         idleTimer.Dispose();
+        updateTimer.Dispose();
+        updateTray?.Dispose();
         hotkeys?.Dispose();
         tray.Visible = false;
         tray.Dispose();
@@ -573,6 +692,7 @@ internal sealed class MainForm : Form
         private readonly Label status = new() { AutoSize = false, AutoEllipsis = true, ForeColor = Muted, Font = new Font("Segoe UI", 8.5F), Anchor = AnchorStyles.Left | AnchorStyles.Right, Location = new Point(21, 27), Height = 20 };
         private readonly Label accountTitle;
         private readonly Panel accountDot;
+        private readonly Action reloadAction;
         public string AccountName { get; private set; }
 
         public BrowserPane(string key, string name, Color accent, MainForm parent)
@@ -596,7 +716,7 @@ internal sealed class MainForm : Form
             titleArea.Controls.Add(status);
             header.Controls.Add(titleArea, 0, 0);
             var reload = MakeButton("Muat ulang", 90);
-            reload.Click += (_, _) =>
+            reloadAction = () =>
             {
                 try
                 {
@@ -606,6 +726,7 @@ internal sealed class MainForm : Form
                 catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or System.Runtime.InteropServices.COMException)
                 { SetStatus("Sesi berhenti — keluar dan buka lagi"); }
             };
+            reload.Click += (_, _) => reloadAction();
             header.Controls.Add(reload, 1, 0);
             var folder = MakeButton("Folder", 68);
             folder.Click += (_, _) => parent.OpenFolder(key);
@@ -616,6 +737,7 @@ internal sealed class MainForm : Form
         }
 
         public void SetStatus(string text) => status.Text = text;
+        public void Reload() => reloadAction();
         public string StatusText => status.Text;
         public void SetIdentity(string name, Color color) { AccountName = name; accountTitle.Text = name; accountDot.BackColor = color; }
     }

@@ -9,6 +9,7 @@
     <Compile Include="../duodesk/AppPaths.cs" Link="AppPaths.cs" />
     <Compile Include="../duodesk/AppSettings.cs" Link="AppSettings.cs" />
     <Compile Include="../duodesk/LayoutPreferences.cs" Link="LayoutPreferences.cs" />
+    <Compile Include="../duodesk/ConnectionAdvice.cs" Link="ConnectionAdvice.cs" />
     <Compile Include="../duodesk/NavigationTracker.cs" Link="NavigationTracker.cs" />
     <Compile Include="../duodesk/IdleMonitor.cs" Link="IdleMonitor.cs" Condition="Exists('../duodesk/IdleMonitor.cs')" />
   </ItemGroup>

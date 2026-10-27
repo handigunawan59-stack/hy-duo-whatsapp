@@ -27,10 +27,10 @@ InstallDir "$LOCALAPPDATA\Programs\${APP_NAME}"
 InstallDirRegKey HKCU "${APP_REGISTRY_KEY}" "InstallLocation"
 ShowInstDetails show
 ShowUninstDetails show
-VIProductVersion "1.1.0.0"
+VIProductVersion "1.2.0.0"
 VIAddVersionKey "ProductName" "${APP_NAME}"
 VIAddVersionKey "FileDescription" "${APP_NAME} installer"
-VIAddVersionKey "FileVersion" "1.1.0.0"
+VIAddVersionKey "FileVersion" "1.2.0.0"
 VIAddVersionKey "LegalCopyright" "Copyright 2026 HY Duo WhatsApp contributors"
 
 !define MUI_ABORTWARNING
@@ -100,7 +100,7 @@ Section "Aplikasi" SEC_MAIN
   CreateShortcut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\DuoDesk.exe"
   CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\DuoDesk.exe"
   WriteRegStr HKCU "${APP_REGISTRY_KEY}" "DisplayName" "${APP_NAME}"
-  WriteRegStr HKCU "${APP_REGISTRY_KEY}" "DisplayVersion" "1.1.0"
+  WriteRegStr HKCU "${APP_REGISTRY_KEY}" "DisplayVersion" "1.2.0"
   WriteRegStr HKCU "${APP_REGISTRY_KEY}" "DisplayIcon" "$INSTDIR\DuoDesk.exe"
   WriteRegStr HKCU "${APP_REGISTRY_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${APP_REGISTRY_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'

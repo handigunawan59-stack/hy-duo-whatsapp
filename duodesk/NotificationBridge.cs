@@ -17,6 +17,7 @@ public sealed class NotificationBridge : IDisposable
     private Func<string, string> soundForAccount = _ => "Asterisk";
     private Func<bool> hidePreview = () => false;
     private Func<string, string>? labelForAccount;
+    private Action<string, string?, string?>? historyRecorder;
     private readonly string allowedOrigin;
     private readonly Queue<PendingNotification> pending = new();
     private readonly List<Attachment> attachments = new();
@@ -70,6 +71,9 @@ public sealed class NotificationBridge : IDisposable
         labelForAccount = labelSelector;
     }
 
+    /// <summary>History is opt-in; the host supplies a local recorder that enforces the user's preference.</summary>
+    public void ConfigureHistory(Action<string, string?, string?>? recorder) => historyRecorder = recorder;
+
     public void TestNotification(string accountKey, string accountLabel, string? soundOverride = null)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
@@ -121,6 +125,8 @@ public sealed class NotificationBridge : IDisposable
             try
             {
                 var notification = args.Notification;
+                try { historyRecorder?.Invoke(accountKey, notification.Title, notification.Body); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException) { status(accountKey, "Riwayat notifikasi tidak tersedia"); }
                 var message = FormatMessage(labelForAccount?.Invoke(accountKey) ?? accountLabel, notification.Title, notification.Body);
                 args.Handled = true;
                 pending.Enqueue(new PendingNotification(accountKey, message.Title, message.Body, notification));

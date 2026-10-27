@@ -14,4 +14,6 @@ internal static class LayoutPreferences
     }
     public static double Ratio(double value) => double.IsFinite(value) ? Math.Clamp(value, .2, .8) : .5;
     public static bool IsDark(string? value, bool systemDark) => value == "dark" || (value == "system" && systemDark);
+    public static double Zoom(double value) => double.IsFinite(value) ? Math.Clamp(value, .5, 2.0) : 1.0;
+    public static string Layout(string? value) => value is "tabs" or "stack" or "split" ? value : "split";
 }
