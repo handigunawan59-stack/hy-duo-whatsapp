@@ -47,7 +47,7 @@ internal static class Program
             return;
         }
 
-        using var mainForm = new MainForm(dataDirectory, testPage);
+        using var mainForm = new MainForm(dataDirectory, testPage, args.Contains("--start-hidden", StringComparer.Ordinal));
         // Create the handle before listening, so an early second launch is not lost.
         _ = mainForm.Handle;
         var listener = ThreadPool.RegisterWaitForSingleObject(activation, (_, _) =>

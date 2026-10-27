@@ -13,6 +13,10 @@ public sealed class NotificationBridge : IDisposable
     private readonly Action<string> selectAccount;
     private readonly Action<string, string> status;
     private readonly Action playSound;
+    private readonly bool hasCustomSound;
+    private Func<string, string> soundForAccount = _ => "Asterisk";
+    private Func<bool> hidePreview = () => false;
+    private Func<string, string>? labelForAccount;
     private readonly string allowedOrigin;
     private readonly Queue<PendingNotification> pending = new();
     private readonly List<Attachment> attachments = new();
@@ -27,6 +31,7 @@ public sealed class NotificationBridge : IDisposable
         string allowedOrigin = "https://web.whatsapp.com")
         : this(tray, selectAccount, status, allowedOrigin, () => SystemSounds.Asterisk.Play())
     {
+        hasCustomSound = false;
     }
 
     internal NotificationBridge(
@@ -48,12 +53,48 @@ public sealed class NotificationBridge : IDisposable
         this.selectAccount = selectAccount;
         this.status = status;
         this.playSound = playSound;
+        hasCustomSound = true;
         this.allowedOrigin = allowedOrigin;
         displayTimeout = new System.Windows.Forms.Timer { Interval = 12000 };
         displayTimeout.Tick += OnDisplayTimeout;
         tray.BalloonTipShown += OnBalloonShown;
         tray.BalloonTipClicked += OnBalloonClicked;
         tray.BalloonTipClosed += OnBalloonClosed;
+    }
+
+    /// <summary>Use live settings, so changes take effect for subsequent notifications.</summary>
+    public void Configure(Func<string, string> soundSelector, Func<bool> hideMessagePreview, Func<string, string>? labelSelector = null)
+    {
+        soundForAccount = soundSelector ?? throw new ArgumentNullException(nameof(soundSelector));
+        hidePreview = hideMessagePreview ?? throw new ArgumentNullException(nameof(hideMessagePreview));
+        labelForAccount = labelSelector;
+    }
+
+    public void TestNotification(string accountKey, string accountLabel, string? soundOverride = null)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (accountKey is not ("personal" or "business")) throw new ArgumentException("Unknown account.", nameof(accountKey));
+        pending.Enqueue(new PendingNotification(accountKey, $"{accountLabel} • Tes notifikasi", "Ini adalah notifikasi uji HY Duo WhatsApp.", null));
+        PlayAccountSound(accountKey, soundOverride);
+        ShowNext();
+    }
+
+    private void PlayAccountSound(string accountKey, string? soundOverride = null)
+    {
+        try
+        {
+            if (hasCustomSound) { playSound(); return; }
+            switch (soundOverride ?? soundForAccount(accountKey))
+            {
+                case "Beep": SystemSounds.Beep.Play(); break;
+                case "Exclamation": SystemSounds.Exclamation.Play(); break;
+                case "Hand": SystemSounds.Hand.Play(); break;
+                case "Question": SystemSounds.Question.Play(); break;
+                default: SystemSounds.Asterisk.Play(); break;
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        { status(accountKey, "Suara notifikasi tidak tersedia"); }
     }
 
     public void Attach(CoreWebView2 core, string accountKey, string accountLabel)
@@ -80,14 +121,10 @@ public sealed class NotificationBridge : IDisposable
             try
             {
                 var notification = args.Notification;
-                var message = FormatMessage(accountLabel, notification.Title, notification.Body);
+                var message = FormatMessage(labelForAccount?.Invoke(accountKey) ?? accountLabel, notification.Title, notification.Body);
                 args.Handled = true;
                 pending.Enqueue(new PendingNotification(accountKey, message.Title, message.Body, notification));
-                try { playSound(); }
-                catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
-                {
-                    status(accountKey, "Suara notifikasi tidak tersedia");
-                }
+                PlayAccountSound(accountKey);
                 ShowNext();
             }
             catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or ObjectDisposedException)
@@ -108,7 +145,7 @@ public sealed class NotificationBridge : IDisposable
         current = pending.Dequeue();
         try
         {
-            tray.ShowBalloonTip(10000, current.Title, current.Body, ToolTipIcon.None);
+            tray.ShowBalloonTip(10000, current.Title, PreviewBody(current.Body, hidePreview()), ToolTipIcon.None);
             displayTimeout.Start();
         }
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or System.ComponentModel.Win32Exception)
@@ -127,8 +164,8 @@ public sealed class NotificationBridge : IDisposable
         displayTimeout.Stop();
         try
         {
-            current.Notification.ReportShown();
-            current.ReportedShown = true;
+            current.Notification?.ReportShown();
+            current.ReportedShown = current.Notification is not null;
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or ObjectDisposedException)
         {
@@ -144,7 +181,7 @@ public sealed class NotificationBridge : IDisposable
         {
             selectAccount(clicked.AccountKey);
             if (clicked.ReportedShown)
-                clicked.Notification.ReportClicked();
+                clicked.Notification?.ReportClicked();
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or ObjectDisposedException)
         {
@@ -175,7 +212,7 @@ public sealed class NotificationBridge : IDisposable
         current = null;
         if (completed is not null && completed.ReportedShown && !completed.Clicked)
         {
-            try { completed.Notification.ReportClosed(); }
+            try { completed.Notification?.ReportClosed(); }
             catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException or ObjectDisposedException)
             {
                 status(completed.AccountKey, "Status notifikasi tidak tersedia");
@@ -190,6 +227,18 @@ public sealed class NotificationBridge : IDisposable
         var content = string.IsNullOrWhiteSpace(body) ? "Pesan baru diterima." : body.Trim();
         return ($"{accountLabel} • {sender}", content);
     }
+
+    internal static (string Title, string Body) FormatForPrivacy(string accountLabel, string? title, string? body, bool hidePreview)
+    {
+        var message = FormatMessage(accountLabel, title, body);
+        return (message.Title, PreviewBody(message.Body, hidePreview));
+    }
+
+    private static string PreviewBody(string body, bool hidePreview)
+        => hidePreview ? "Pesan baru diterima." : body;
+
+    internal static string SoundForAccount(string accountKey, string personalSound, string businessSound)
+        => accountKey switch { "personal" => personalSound, "business" => businessSound, _ => "Asterisk" };
 
     internal static bool IsTrustedOrigin(string source, string allowedOrigin)
     {
@@ -245,12 +294,12 @@ public sealed class NotificationBridge : IDisposable
         EventHandler<CoreWebView2PermissionRequestedEventArgs> Permission,
         EventHandler<CoreWebView2NotificationReceivedEventArgs> Received);
 
-    private sealed class PendingNotification(string accountKey, string title, string body, CoreWebView2Notification notification)
+    private sealed class PendingNotification(string accountKey, string title, string body, CoreWebView2Notification? notification)
     {
         public string AccountKey { get; } = accountKey;
         public string Title { get; } = title;
         public string Body { get; } = body;
-        public CoreWebView2Notification Notification { get; } = notification;
+        public CoreWebView2Notification? Notification { get; } = notification;
         public bool BalloonShown { get; set; }
         public bool ReportedShown { get; set; }
         public bool Clicked { get; set; }

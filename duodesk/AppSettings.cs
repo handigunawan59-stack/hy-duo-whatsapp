@@ -8,6 +8,16 @@ internal sealed class AppSettings
     public string BusinessDownloadFolder { get; set; } = "";
     public string LayoutMode { get; set; } = "split";
     public string ActiveAccount { get; set; } = "personal";
+    public string PersonalLabel { get; set; } = "Pribadi";
+    public string BusinessLabel { get; set; } = "Usaha";
+    public string PersonalColor { get; set; } = "#7D79D8";
+    public string BusinessColor { get; set; } = "#27AE75";
+    public string Theme { get; set; } = "system";
+    public double SplitRatio { get; set; } = 0.5;
+    public string PersonalSound { get; set; } = "Asterisk";
+    public string BusinessSound { get; set; } = "Asterisk";
+    public bool HidePreviewWhenLocked { get; set; }
+    public int AutoLockMinutes { get; set; }
 }
 
 internal static class SettingsStore

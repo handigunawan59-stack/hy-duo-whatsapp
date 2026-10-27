@@ -10,6 +10,7 @@
     <Product>HY Duo WhatsApp</Product>
     <Title>HY Duo WhatsApp</Title>
     <Description>Two independent WhatsApp Web sessions in one Windows application.</Description>
+    <Version>1.1.0</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>duodesk.ico</ApplicationIcon>
   </PropertyGroup>
