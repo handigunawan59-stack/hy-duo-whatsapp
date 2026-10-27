@@ -2,6 +2,10 @@
 
 Aplikasi Windows untuk memakai dua sesi WhatsApp Web dalam satu jendela. Proyek ini dibuat secara independen dan tidak berafiliasi dengan WhatsApp atau Meta.
 
+## Unduh installer
+
+Unduh installer Windows 64-bit dari [rilis awal](https://github.com/handigunawan59-stack/hy-duo-whatsapp/releases/tag/v1.0.0-preview). Tutup DuoDesk versi lama melalui ikon baki sistem sebelum menjalankan installer. Installer belum ditandatangani secara digital dan Windows dapat menampilkan peringatan.
+
 ## Fitur
 
 - Dua sesi terpisah untuk akun Pribadi dan Usaha, masing-masing dengan penyimpanan browser sendiri.
